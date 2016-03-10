@@ -14,6 +14,8 @@
 #import "ShadowsocksRunner.h"
 #import "ProfileManager.h"
 #import "AFNetworking.h"
+#import "TFHpple.h"
+#import "ServerInfo.h"
 
 #define kShadowsocksIsRunningKey @"ShadowsocksIsRunning"
 #define kShadowsocksRunningModeKey @"ShadowsocksMode"
@@ -104,6 +106,7 @@ static SWBAppDelegate *appDelegate;
     [menu addItem:[[NSMenuItem alloc] initWithTitle:_L(Scan QR Code from Screen...) action:@selector(scanQRCode) keyEquivalent:@""]];
     [menu addItem:[NSMenuItem separatorItem]];
     [menu addItemWithTitle:_L(Show Logs...) action:@selector(showLogs) keyEquivalent:@""];
+    [menu addItemWithTitle:_L(Update Config) action:@selector(updateConfig) keyEquivalent:@""];
     [menu addItemWithTitle:_L(Help) action:@selector(showHelp) keyEquivalent:@""];
     [menu addItem:[NSMenuItem separatorItem]];
     [menu addItemWithTitle:_L(Quit) action:@selector(exit) keyEquivalent:@""];
@@ -298,6 +301,96 @@ void onPACChange(
 - (void)showLogs {
     [[NSWorkspace sharedWorkspace] launchApplication:@"/Applications/Utilities/Console.app"];
 }
+
+- (void)updateConfig {
+    [manager GET:@"http://www.ishadowsocks.com/#free" parameters:nil success:^(AFHTTPRequestOperation *operation, id responseObject) {
+        // Objective-C is bullshit
+        NSData *data = responseObject;
+        
+        NSArray * serverList = [[NSMutableArray alloc] initWithCapacity:3];
+        TFHpple * doc       = [[TFHpple alloc] initWithHTMLData:data];
+        for(int i = 1; i < 4; i++)
+        {
+            ServerInfo *server = [[ServerInfo alloc] init];
+            for(int j = 1; j < 7; j++)
+            {
+                NSString *xpath = [NSString stringWithFormat:@"//*[@id=\"free\"]/div/div[2]/div[%d]/h4[%d]", i, j];
+                if(j == 6)
+                    xpath = [NSString stringWithFormat:@"//*[@id=\"free\"]/div/div[2]/div[%d]/h4[%d]/font", i, j];
+                NSArray * elems  = [doc searchWithXPathQuery:xpath];
+                TFHppleElement * element = [elems objectAtIndex:0];
+                NSArray *result = [[element content] componentsSeparatedByString:@":"];
+                
+                if(j == 1)
+                {
+                    if([result count] < 2)
+                        break;
+                    server.server = [result objectAtIndex:1];
+                }
+                else if(j == 2)
+                {
+                    if([result count] < 2)
+                        break;
+                    server.serverPort = [[result objectAtIndex:1] integerValue];
+                    
+                }
+                else if(j == 3)
+                {
+                    if([result count] < 2)
+                        break;
+                    server.password = [result objectAtIndex:1];
+                }
+                else if(j == 4)
+                {
+                    if([result count] < 2)
+                        break;
+                    server.method = [result objectAtIndex:1];
+                }
+                else if(j == 5)
+                {
+                    if([result count] < 2)
+                        break;
+                    server.status = [result objectAtIndex:1];
+                }
+                else if(j == 6)
+                {
+                    if([result count] < 2)
+                        server.remarks = [result objectAtIndex:0];
+                    else
+                        server.remarks = [result objectAtIndex:1];
+                }
+            }
+            [((NSMutableArray *)serverList) addObject:server];
+        }
+        
+        Configuration *configuration = [ProfileManager configuration];
+        for (Profile *profile in configuration.profiles) {
+            for(ServerInfo *serverInfo in serverList)
+            {
+                if([serverInfo.server compare:profile.server options:NSCaseInsensitiveSearch] == 0)
+                {
+                    if([serverInfo.status compare:@"正常"] == 0)
+                    {
+                        profile.password = serverInfo.password;
+                        [ProfileManager saveConfiguration:configuration];
+                        [ShadowsocksRunner reloadConfig];
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Objective-C is bullshit
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"Updated";
+        [alert runModal];
+    } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+        NSLog(@"Error: %@", error);
+        NSAlert *alert = [NSAlert alertWithError:error];
+        [alert runModal];
+    }];
+}
+
 
 - (void)showHelp {
     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:NSLocalizedString(@"https://github.com/shadowsocks/shadowsocks-iOS/wiki/Shadowsocks-for-OSX-Help", nil)]];
